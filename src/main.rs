@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::env;
 use std::error::Error;
-use std::fs::read;
+use std::fs::{File, read};
+use std::io::Read;
 use std::path::Path;
 
 use base64::Engine;
@@ -10,6 +12,7 @@ use jwt::algorithm::openssl::PKeyWithDigest;
 use jwt::SigningAlgorithm;
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
+use serde::Deserialize;
 
 use token::Header;
 
@@ -17,7 +20,7 @@ use crate::token::{AccessTokenResponse, aud, Payload};
 
 mod token;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default, Deserialize)]
 #[command(
 name = "Token Generator by Certificate for Azure",
 version = "1.0",
@@ -27,33 +30,49 @@ about = "Generates an Azure access token using a certificate for authentication.
 struct Args {
     /// Azure tenant ID
     #[arg(short, long)]
-    tenant_id: String,
+    tenant_id: Option<String>,
 
     /// Azure client ID
     #[arg(short = 'i', long)]
-    client_id: String,
+    client_id: Option<String>,
 
     /// Scope for the Azure service
     #[arg(short, long)]
-    scope: String,
+    scope: Option<String>,
 
     /// Path to the private key PEM file
     #[arg(short = 'k', long)]
-    key_path: String,
+    key_path: Option<String>,
 
     /// Path to the certificate PEM file
     #[arg(short = 'c', long)]
-    cert_path: String,
+    cert_path: Option<String>,
+}
+
+fn read_default_config() -> Result<Args, Box<dyn Error>> {
+    let home_dir = env::var("HOME")?;
+    let config_path = Path::new(&home_dir).join(".tokengen-cert");
+    if config_path.exists() {
+        let mut file = File::open(config_path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        let args: Args = serde_json::from_str(&contents)?;
+        Ok(args)
+    } else {
+        Ok(Args::default())
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let default_args = read_default_config()?;
     let args = Args::parse();
-    let tenant_id = args.tenant_id;
-    let client_id = args.client_id;
-    let scope = args.scope;
-    let key_path = args.key_path;
-    let cert_path = args.cert_path;
+
+    let tenant_id = args.tenant_id.unwrap_or(default_args.tenant_id.unwrap());
+    let client_id = args.client_id.unwrap_or(default_args.client_id.unwrap());
+    let scope = args.scope.unwrap_or(default_args.scope.unwrap());
+    let key_path = args.key_path.unwrap_or(default_args.key_path.unwrap());
+    let cert_path = args.cert_path.unwrap_or(default_args.cert_path.unwrap());
 
     let pem = read(Path::new(&key_path))?;
     let public_key_pem = read(Path::new(&cert_path))?;
